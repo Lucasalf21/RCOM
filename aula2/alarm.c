@@ -33,8 +33,7 @@ int main()
             alarm(3); // Set alarm to be triggered in 3s
             alarmEnabled = TRUE;
         }
-    }
-
+    }    
     printf("Ending program\n");
 
     return 0;

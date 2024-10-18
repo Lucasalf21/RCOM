@@ -103,7 +103,7 @@ int main(int argc, char *argv[])
             printf(":%s:%d\n", buf, bytes); 
             break;
         }
-        if (buf[4] == 0x7E){
+        else{
             unsigned char ua[BUF_SIZE] = {0x7E, 0x01, 0X07, ua[1] ^ ua[2], 0x7E};
             int writebytes = write(fd, ua, BUF_SIZE);
             printf("%d bytes written\n", writebytes);
