@@ -36,7 +36,6 @@ void alarmHandler(int signal)
     alarmEnabled = FALSE;
     alarmCount++;
     printf("Alarm #%d\n", alarmCount);
-    w = TRUE;
 }
 
 int main(int argc, char *argv[])
@@ -110,39 +109,36 @@ int main(int argc, char *argv[])
 
     buf[5] = '\n';
     
-    int bytes = write(fd, buf, BUF_SIZE);
-    printf("%d bytes written\n", bytes);
     (void)signal(SIGALRM, alarmHandler);
     int r = FALSE;
+    unsigned char ua[BUF_SIZE] = {0};
+
+    int writeBytes = 0, readBytes = 0;
     while (r == FALSE && alarmCount < 3){
-            if (alarmEnabled == FALSE)
-            {
-                alarm(3); // Set alarm to be triggered in 3s
-                alarmEnabled = TRUE;
+        int writeBytes = write(fd, buf, BUF_SIZE);
+        if (alarmEnabled == FALSE)
+        {
+            alarm(3); // Set alarm to be triggered in 3s
+            alarmEnabled = TRUE;
+            readBytes = read(fd, ua, BUF_SIZE);
+        }
+        r = TRUE;
+            for (unsigned i = 0; i < writeBytes; i++){
+                printf("ua = 0x%02X\n", ua[i]);
             }
             
-            if (w == TRUE) {
-            int bytes = write(fd, buf, BUF_SIZE);
-            printf("%d bytes written\n", bytes);
-            w = FALSE; 
-            }
+            printf("%d bytes read\n", writeBytes);   
+            
 
-            unsigned char ua[BUF_SIZE] = {0x7E, 0x03, 0x07, ua[1] ^ ua[2], 0x7E};
-            int byte2 = read(fd, ua, BUF_SIZE);
-            if (byte2 == 0){
-                printf("no message received\n");
-            }
-            else{
-                r = TRUE;
-                for (unsigned i = 0; i < bytes; i++){
-                    printf("ua = 0x%02X\n", ua[i]);
-                }
-                alarm(0);
-                printf("%d bytes read\n", byte2);   
-            }
+        readBytes = read(fd, ua, BUF_SIZE);
+        if (readBytes == 0){
+            printf("no message received\n");
         }
-
-    
+        if(alarmCount > 4){
+            printf("PA PA PA PAROU!!!!");
+        }
+        alarm(0);
+    }
     // Restore the old port settings
     if (tcsetattr(fd, TCSANOW, &oldtio) == -1)
     {
