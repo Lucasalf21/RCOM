@@ -17,7 +17,8 @@ enum State
 #define TRUE 1
 #define BUF_SIZE 256
 #define F (0x7E)
-#define TRANSMITTER_ADRESS (0x03)
+#define TRANSMITTER_ADDRESS (0x03)
+#define ESC (0x7D)
 
 
 void alarmHandler(int signal);

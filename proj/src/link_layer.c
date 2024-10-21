@@ -54,7 +54,7 @@ int llopen(LinkLayer connectionParameters)
                 break;
 
             case FLAG:
-                if (bf[0] == TRANSMITTER_ADRESS)
+                if (bf[0] == TRANSMITTER_ADDRESS)
                     state = A;
                 else if (bf[0] == FLAG)
                     break;
@@ -110,7 +110,7 @@ int llopen(LinkLayer connectionParameters)
                 break;
 
             case FLAG:
-                if (bf[0] == TRANSMITTER_ADRESS)
+                if (bf[0] == TRANSMITTER_ADDRESS)
                     state = A;
                 else if (bf[0] == FLAG)
                     break;
@@ -166,19 +166,28 @@ int llwrite(const unsigned char *buf, int bufSize)
     unsigned char *infoFrame = (unsigned char*) malloc(frameSize);
 
     infoFrame[0] = F;
-    infoFrame[1] = TRANSMITTER_ADRESS;
+    infoFrame[1] = TRANSMITTER_ADDRESS;
     //infoFrame[2] = 
     infoFrame[3] = infoFrame[1] ^ infoFrame[2];
     
     int j = 4;
     for (int i = 0; i < bufSize; i++){
-        infoFrame[j] = buf[i];
+        if (buf[i] == F || buf[i] == ESC){
+            infoFrame = realloc(infoFrame, ++frameSize);
+            infoFrame[j++] = ESC;
+            infoFrame[j++] = buf[i] ^ 0x20;
+        } else{
+            infoFrame[j++] = buf[i];
+        }
     }
 
     unsigned char bcc2 = 0;
     for (int i = 0;  i < bufSize; i++){
         bcc2 ^= buf[i];
     }
+    infoFrame[j++] = bcc2;
+    infoFrame[j] = F;
+
 
     return 0;
 }
