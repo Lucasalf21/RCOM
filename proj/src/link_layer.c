@@ -162,7 +162,23 @@ int llopen(LinkLayer connectionParameters)
 ////////////////////////////////////////////////
 int llwrite(const unsigned char *buf, int bufSize)
 {
-    // TODO
+    int frameSize = bufSize + 6;
+    unsigned char *infoFrame = (unsigned char*) malloc(frameSize);
+
+    infoFrame[0] = F;
+    infoFrame[1] = TRANSMITTER_ADRESS;
+    //infoFrame[2] = 
+    infoFrame[3] = infoFrame[1] ^ infoFrame[2];
+    
+    int j = 4;
+    for (int i = 0; i < bufSize; i++){
+        infoFrame[j] = buf[i];
+    }
+
+    unsigned char bcc2 = 0;
+    for (int i = 0;  i < bufSize; i++){
+        bcc2 ^= buf[i];
+    }
 
     return 0;
 }
