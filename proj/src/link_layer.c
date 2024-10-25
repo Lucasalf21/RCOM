@@ -9,11 +9,14 @@
 #define _POSIX_SOURCE 1 // POSIX compliant source
 
 
-extern int alarmEnabled = FALSE;
-extern int alarmCnt = 0;
-int fd;
-int nRetransmissions = 0;
-int timeout = 0;
+extern unsigned char alarmEnabled = FALSE;
+extern unsigned char alarmCnt = 0;
+unsigned char fd;
+unsigned char nRetransmissions = 0;
+unsigned char timeout = 0;
+unsigned char information_frame = I0;
+unsigned char frameCnt = 0;
+unsigned char totalRejCount = 0;
 
 
 ////////////////////////////////////////////////
@@ -199,6 +202,8 @@ int llwrite(const unsigned char *buf, int bufSize)
     infoFrame[j++] = bcc2;
     infoFrame[j] = F;
 
+    
+
     return 0;
 }
 
@@ -207,7 +212,51 @@ int llwrite(const unsigned char *buf, int bufSize)
 ////////////////////////////////////////////////
 int llread(unsigned char *packet)
 {
-    // TODO
+    int sz = read_p(fd, information_frame, packet);
+
+    frameCnt++;
+
+    unsigned char BCC2 = 0;
+    sz = sz - 1;
+
+
+    if (sz == -1)
+    {
+
+        printf("Repeted information! Resending response!\n");
+        if (information_frame == I0)
+            write_RR(fd, I0);
+        else
+            write_RR(fd, I1);
+            totalRejCount++;
+            return -1;
+    }
+    
+    for(unsigned i = 0; i <= sz; i++)
+    {
+        BCC2 ^= packet[i];
+    }
+    
+    if(BCC2 == packet[sz])
+    {
+
+        write_RR(fd, information_frame);
+
+        if (information_frame == I0)
+            information_frame = I1;
+        else
+            information_frame = I0;
+        return sz;
+
+    }
+    else
+    {
+        printf("Deu porcaria!!!\n");
+        write_REJ(fd, information_frame);
+        totalRejCount++;
+        return -1;
+    }
+
 
     return 0;
 }
