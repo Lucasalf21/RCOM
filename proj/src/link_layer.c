@@ -12,6 +12,8 @@
 extern int alarmEnabled = FALSE;
 extern int alarmCnt = 0;
 int fd;
+int nRetransmissions = 0;
+int timeout = 0;
 
 
 ////////////////////////////////////////////////
@@ -27,6 +29,8 @@ int llopen(LinkLayer connectionParameters)
     alarmCnt = 0;
     enum State state = START;
     unsigned char bf[BUF_SIZE + 1] = {0};
+    nRetransmissions = connectionParameters.nRetransmissions;
+    timeout = connectionParameters.timeout;
 
     while(state != STOP && alarmCnt < 3)// 3 is number specified to the number of tries
     {
@@ -54,7 +58,7 @@ int llopen(LinkLayer connectionParameters)
                 break;
 
             case FLAG:
-                if (bf[0] == TRANSMITTER_ADRESS)
+                if (bf[0] == TRANSMITTER_ADDRESS)
                     state = A;
                 else if (bf[0] == FLAG)
                     break;
@@ -110,7 +114,7 @@ int llopen(LinkLayer connectionParameters)
                 break;
 
             case FLAG:
-                if (bf[0] == TRANSMITTER_ADRESS)
+                if (bf[0] == TRANSMITTER_ADDRESS)
                     state = A;
                 else if (bf[0] == FLAG)
                     break;
@@ -160,9 +164,40 @@ int llopen(LinkLayer connectionParameters)
 ////////////////////////////////////////////////
 // LLWRITE
 ////////////////////////////////////////////////
+
+unsigned char Tx = 0;
+
 int llwrite(const unsigned char *buf, int bufSize)
 {
-    // TODO
+    int frameSize = bufSize + 6;
+    unsigned char *infoFrame = (unsigned char*) malloc(frameSize);
+
+    infoFrame[0] = F;
+    infoFrame[1] = TRANSMITTER_ADDRESS;
+    if (Tx % 2 == 0){
+        infoFrame[2] = TX_0;
+    } else{
+        infoFrame[2] = TX_1;
+    }
+    infoFrame[3] = infoFrame[1] ^ infoFrame[2];
+    
+    int j = 4;
+    for (int i = 0; i < bufSize; i++){
+        if (buf[i] == F || buf[i] == ESC){
+            infoFrame = realloc(infoFrame, ++frameSize);
+            infoFrame[j++] = ESC;
+            infoFrame[j++] = buf[i] ^ 0x20;
+        } else{
+            infoFrame[j++] = buf[i];
+        }
+    }
+
+    unsigned char bcc2 = 0;
+    for (int i = 0;  i < bufSize; i++){
+        bcc2 ^= buf[i];
+    }
+    infoFrame[j++] = bcc2;
+    infoFrame[j] = F;
 
     return 0;
 }
