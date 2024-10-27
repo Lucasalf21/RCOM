@@ -174,7 +174,16 @@ unsigned write_REJ(unsigned fd, int information_frame)
         return 1;
 
 }
-unsigned write_SUD()
+unsigned write_SUD(unsigned char fd, unsigned char control)
 {
-    
+    frame.data[0] = F;
+    frame.data[1] = TRANSMITTER_ADDRESS;
+    frame.data[2] = control;
+    frame.data[3] = (TRANSMITTER_ADDRESS ^ frame.data[2]);
+    frame.data[4] = F;
+
+    int bytes = write(fd, frame.data, 5);
+
+    return 1;
+
 }

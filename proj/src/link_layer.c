@@ -17,21 +17,23 @@ unsigned char timeout = 0;
 unsigned char information_frame = I0;
 unsigned char frameCnt = 0;
 unsigned char totalRejCount = 0;
-
+unsigned sz = 0;
+unsigned currentTransmission = 0;
 
 ////////////////////////////////////////////////
 // LLOPEN
 ////////////////////////////////////////////////
 int llopen(LinkLayer connectionParameters)
 {
-    if (openSerialPort(connectionParameters.serialPort, connectionParameters.baudRate) < 0)
+    if (fd = openSerialPort(connectionParameters.serialPort, connectionParameters.baudRate) < 0)
     {
         return -1;
     }
     (void) signal(SIGALRM, alarmHandler);
     alarmCnt = 0;
-    enum State state = START;
+    enum State state = START; 
     unsigned char bf[BUF_SIZE + 1] = {0};
+    Frame frame;
     nRetransmissions = connectionParameters.nRetransmissions;
     timeout = connectionParameters.timeout;
 
@@ -57,44 +59,53 @@ int llopen(LinkLayer connectionParameters)
             case START:
                 if (bf[0] == F)
                     state = FLAG;
-
+                    frame.Flag = F;
                 break;
 
             case FLAG:
                 if (bf[0] == TRANSMITTER_ADDRESS)
+                {
                     state = A;
-                else if (bf[0] == FLAG)
-                    break;
+                    frame.A = TRANSMITTER_ADDRESS; 
+                }
                 else
                     state = START;
+                    memset(&frame, 0, sizeof(Frame));
                 break;
 
             case A:
                 if (bf[0] == control)
-                    state = C;
+                    {state = C;
+                    frame.C = control;}
                 else if (bf[0] == FLAG)
-                    state = FLAG;
+                    {state = FLAG;}
                 else
-                    state = START;
+                    {state = START;
+                    memset(&frame, 0, sizeof(Frame));
+}
                 break;
 
             case C:
                 if (bf[0] == (0x03 ^ control))
-                    state = BCC1;
+                    {state = BCC1;
+                    frame.BCC = bf[0];}
                 else if (bf[0] == FLAG)
                     state = FLAG;
                 else
                     state = START;
+                    memset(&frame, 0, sizeof(Frame));
                 break;
 
             case BCC1:
                 if (bf[0] == F)
                 {
+                    frame.END_Flag = F;
                     state = STOP;
                     alarm(0);
                 }
                 else
                     state = START;
+                    memset(&frame, 0, sizeof(Frame));
                 break;
             default:
                 break;
@@ -202,7 +213,7 @@ int llwrite(const unsigned char *buf, int bufSize)
     infoFrame[j++] = bcc2;
     infoFrame[j] = F;
 
-    int currentTransmission = 0;
+    currentTransmission = 0;
     int accepted = 0;
 
     while (currentTransmission < nRetransmissions){
@@ -303,7 +314,7 @@ unsigned char getControlInfo(){
 ////////////////////////////////////////////////
 int llread(unsigned char *packet)
 {
-    int sz = read_p(fd, information_frame, packet);
+    sz = read_p(fd, information_frame, packet);
 
     frameCnt++;
 
@@ -357,7 +368,19 @@ int llread(unsigned char *packet)
 ////////////////////////////////////////////////
 int llclose(int showStatistics)
 {
-    // TODO
+    
+
+    // If the user wants to see the statistics, print them
+    if (showStatistics)
+    {
+        printf("\n\n\nStatistics:\n");
+        printf("File size: %ld\n", sz);
+
+            printf("Frames sent: %d\n", currentTransmission);
+            printf("Total number of alarms: %d\n",alarmCnt);
+            printf("Frames read: %d\n", frameCnt);
+            printf("Number of rejection/ repeted information %d\n", totalRejCount);
+    }
 
     int clstat = closeSerialPort();
     return clstat;
