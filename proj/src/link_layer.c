@@ -9,9 +9,14 @@
 #define _POSIX_SOURCE 1 // POSIX compliant source
 
 
-extern int alarmEnabled = FALSE;
-extern int alarmCnt = 0;
-int fd;
+extern unsigned char alarmEnabled = FALSE;
+extern unsigned char alarmCnt = 0;
+unsigned char fd;
+unsigned char nRetransmissions = 0;
+unsigned char timeout = 0;
+unsigned char information_frame = I0;
+unsigned char frameCnt = 0;
+unsigned char totalRejCount = 0;
 
 ////////////////////////////////////////////////
 // LLOPEN
@@ -27,6 +32,8 @@ int llopen(LinkLayer connectionParameters)
     enum State state = START; 
     unsigned char bf[BUF_SIZE + 1] = {0};
     Frame frame;
+    nRetransmissions = connectionParameters.nRetransmissions;
+    timeout = connectionParameters.timeout;
 
     while(state != STOP && alarmCnt < 3)// 3 is number specified to the number of tries
     {
@@ -54,10 +61,10 @@ int llopen(LinkLayer connectionParameters)
                 break;
 
             case FLAG:
-                if (bf[0] == TRANSMITTER_ADRESS)
+                if (bf[0] == TRANSMITTER_ADDRESS)
                 {
                     state = A;
-                    frame.Adress_transmiter = TRANSMITTER_ADRESS; 
+                    frame.A = TRANSMITTER_ADDRESS; 
                 }
                 else
                     state = START;
@@ -66,20 +73,20 @@ int llopen(LinkLayer connectionParameters)
 
             case A:
                 if (bf[0] == control)
-                    state = C;
-                    frame.Control_Field = control;
+                    {state = C;
+                    frame.C = control;}
                 else if (bf[0] == FLAG)
-                    state = FLAG;
+                    {state = FLAG;}
                 else
-                    state = START;
+                    {state = START;
                     memset(&frame, 0, sizeof(Frame));
-
+}
                 break;
 
             case C:
                 if (bf[0] == (0x03 ^ control))
-                    state = BCC1;
-                    frame.BCC = bf[0];
+                    {state = BCC1;
+                    frame.BCC = bf[0];}
                 else if (bf[0] == FLAG)
                     state = FLAG;
                 else
@@ -90,7 +97,7 @@ int llopen(LinkLayer connectionParameters)
             case BCC1:
                 if (bf[0] == F)
                 {
-                    frame.Flag_end = F;
+                    frame.END_Flag = F;
                     state = STOP;
                     alarm(0);
                 }
@@ -119,7 +126,7 @@ int llopen(LinkLayer connectionParameters)
                 break;
 
             case FLAG:
-                if (bf[0] == TRANSMITTER_ADRESS)
+                if (bf[0] == TRANSMITTER_ADDRESS)
                     state = A;
                 else if (bf[0] == FLAG)
                     break;
@@ -169,11 +176,135 @@ int llopen(LinkLayer connectionParameters)
 ////////////////////////////////////////////////
 // LLWRITE
 ////////////////////////////////////////////////
+
+unsigned char Tx = 0;
+
 int llwrite(const unsigned char *buf, int bufSize)
 {
-    // TODO
+    int frameSize = bufSize + 6;
+    unsigned char *infoFrame = (unsigned char*) malloc(frameSize);
 
-    return 0;
+    infoFrame[0] = F;
+    infoFrame[1] = TRANSMITTER_ADDRESS;
+    if (Tx % 2 == 0){
+        infoFrame[2] = TX_0;
+    } else{
+        infoFrame[2] = TX_1;
+    }
+    infoFrame[3] = infoFrame[1] ^ infoFrame[2];
+    
+    int j = 4;
+    for (int i = 0; i < bufSize; i++){
+        if (buf[i] == F || buf[i] == ESC){
+            infoFrame = realloc(infoFrame, ++frameSize);
+            infoFrame[j++] = ESC;
+            infoFrame[j++] = buf[i] ^ 0x20;
+        } else{
+            infoFrame[j++] = buf[i];
+        }
+    }
+
+    unsigned char bcc2 = 0;
+    for (int i = 0;  i < bufSize; i++){
+        bcc2 ^= buf[i];
+    }
+    infoFrame[j++] = bcc2;
+    infoFrame[j] = F;
+
+    int currentTransmission = 0;
+    int accepted = 0;
+
+    while (currentTransmission < nRetransmissions){
+        alarmEnabled = FALSE;
+        alarm(timeout);
+        while (alarmEnabled == FALSE && !accepted){
+            write(fd, infoFrame, frameSize);
+            unsigned char res = getControlInfo();
+
+            if (!res){
+                continue;
+            } else if (res == RR0 || res == RR1){
+                accepted = 1;
+                Tx = (Tx + 1) % 2;
+                break;
+            }
+        }
+        if (accepted){
+            break;
+        }
+        currentTransmission++;
+    }
+
+    free(infoFrame);
+    
+    if (!accepted){
+        llclose(fd);
+        return -1;
+    }
+
+    return frameSize;
+}
+
+unsigned char getControlInfo(){
+    unsigned char byte, c;
+    enum State state = START;
+
+    while (state != STOP){
+        if (read(fd, &byte, 1) > 0){
+            switch (state){
+                case START:
+                    if (byte == F){
+                        state = FLAG;
+                    }
+                    break;
+                
+
+                case FLAG:
+                    if (byte == RECEIVER_ADDRESS){
+                        state = A;
+                    } else if (byte != F){
+                        state = START;
+                    }
+                    break;
+
+                case A:
+                    if (byte == RR0 || byte == RR1 || byte == REJ0 || byte == REJ1 || byte == DISC){
+                        state = C;
+                        c = byte;
+                    } else if (byte == F){
+                        state = FLAG;
+                    } else{
+                        state = START;
+                    }
+                    break;
+
+                case C:
+                    if (byte == (c ^ RECEIVER_ADDRESS)){
+                        state = BCC1;
+                    } else if (byte == F){
+                        state = FLAG;
+                    } else{
+                        state = START;
+                    }
+                    break;
+
+                case BCC1:
+                    if (byte == F){
+                        state = STOP;
+                    } else{
+                        state = START;
+                    }
+                    break;
+
+                default:
+                    break;
+            }
+        } else{
+            return 0;
+        }
+    }
+
+    return c;
 }
 
 ////////////////////////////////////////////////
@@ -181,7 +312,51 @@ int llwrite(const unsigned char *buf, int bufSize)
 ////////////////////////////////////////////////
 int llread(unsigned char *packet)
 {
-    // TODO
+    int sz = read_p(fd, information_frame, packet);
+
+    frameCnt++;
+
+    unsigned char BCC2 = 0;
+    sz = sz - 1;
+
+
+    if (sz == -1)
+    {
+
+        printf("Repeated information! Resending response!\n");
+        if (information_frame == I0)
+            write_RR(fd, I0);
+        else
+            write_RR(fd, I1);
+            totalRejCount++;
+            return -1;
+    }
+    
+    for(unsigned i = 0; i <= sz; i++)
+    {
+        BCC2 ^= packet[i];
+    }
+    
+    if(BCC2 == packet[sz])
+    {
+
+        write_RR(fd, information_frame);
+
+        if (information_frame == I0)
+            information_frame = I1;
+        else
+            information_frame = I0;
+        return sz;
+
+    }
+    else
+    {
+        printf("Deu porcaria!!!\n");
+        write_REJ(fd, information_frame);
+        totalRejCount++;
+        return -1;
+    }
+
 
     return 0;
 }
