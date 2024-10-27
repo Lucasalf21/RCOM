@@ -210,7 +210,7 @@ int llwrite(const unsigned char *buf, int bufSize)
         alarm(timeout);
         while (alarmEnabled == FALSE && !accepted){
             write(fd, infoFrame, frameSize);
-            unsigned char res = getControlInfo(fd); //needs to be implemented
+            unsigned char res = getControlInfo();
 
             if (!res){
                 continue;
@@ -234,6 +234,68 @@ int llwrite(const unsigned char *buf, int bufSize)
     }
 
     return frameSize;
+}
+
+unsigned char getControlInfo(){
+    unsigned char byte, c;
+    enum State state = START;
+
+    while (state != STOP){
+        if (read(fd, &byte, 1) > 0){
+            switch (state){
+                case START:
+                    if (byte == F){
+                        state = FLAG;
+                    }
+                    break;
+                
+
+                case FLAG:
+                    if (byte == RECEIVER_ADDRESS){
+                        state = A;
+                    } else if (byte != F){
+                        state = START;
+                    }
+                    break;
+
+                case A:
+                    if (byte == RR0 || byte == RR1 || byte == REJ0 || byte == REJ1 || byte == DISC){
+                        state = C;
+                        c = byte;
+                    } else if (byte == F){
+                        state = FLAG;
+                    } else{
+                        state = START;
+                    }
+                    break;
+
+                case C:
+                    if (byte == (c ^ RECEIVER_ADDRESS)){
+                        state = BCC1;
+                    } else if (byte == F){
+                        state = FLAG;
+                    } else{
+                        state = START;
+                    }
+                    break;
+
+                case BCC1:
+                    if (byte == F){
+                        state = STOP;
+                    } else{
+                        state = START;
+                    }
+                    break;
+
+                default:
+                    break;
+            }
+        } else{
+            return 0;
+        }
+    }
+
+    return c;
 }
 
 ////////////////////////////////////////////////
