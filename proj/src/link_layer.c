@@ -13,20 +13,20 @@ extern int alarmEnabled = FALSE;
 extern int alarmCnt = 0;
 int fd;
 
-
 ////////////////////////////////////////////////
 // LLOPEN
 ////////////////////////////////////////////////
 int llopen(LinkLayer connectionParameters)
 {
-    if (openSerialPort(connectionParameters.serialPort, connectionParameters.baudRate) < 0)
+    if (fd = openSerialPort(connectionParameters.serialPort, connectionParameters.baudRate) < 0)
     {
         return -1;
     }
     (void) signal(SIGALRM, alarmHandler);
     alarmCnt = 0;
-    enum State state = START;
+    enum State state = START; 
     unsigned char bf[BUF_SIZE + 1] = {0};
+    Frame frame;
 
     while(state != STOP && alarmCnt < 3)// 3 is number specified to the number of tries
     {
@@ -50,44 +50,53 @@ int llopen(LinkLayer connectionParameters)
             case START:
                 if (bf[0] == F)
                     state = FLAG;
-
+                    frame.Flag = F;
                 break;
 
             case FLAG:
                 if (bf[0] == TRANSMITTER_ADRESS)
+                {
                     state = A;
-                else if (bf[0] == FLAG)
-                    break;
+                    frame.Adress_transmiter = TRANSMITTER_ADRESS; 
+                }
                 else
                     state = START;
+                    memset(&frame, 0, sizeof(Frame));
                 break;
 
             case A:
                 if (bf[0] == control)
                     state = C;
+                    frame.Control_Field = control;
                 else if (bf[0] == FLAG)
                     state = FLAG;
                 else
                     state = START;
+                    memset(&frame, 0, sizeof(Frame));
+
                 break;
 
             case C:
                 if (bf[0] == (0x03 ^ control))
                     state = BCC1;
+                    frame.BCC = bf[0];
                 else if (bf[0] == FLAG)
                     state = FLAG;
                 else
                     state = START;
+                    memset(&frame, 0, sizeof(Frame));
                 break;
 
             case BCC1:
                 if (bf[0] == F)
                 {
+                    frame.Flag_end = F;
                     state = STOP;
                     alarm(0);
                 }
                 else
                     state = START;
+                    memset(&frame, 0, sizeof(Frame));
                 break;
             default:
                 break;
@@ -182,8 +191,7 @@ int llread(unsigned char *packet)
 ////////////////////////////////////////////////
 int llclose(int showStatistics)
 {
-    // TODO
-
+    
     int clstat = closeSerialPort();
     return clstat;
 }
