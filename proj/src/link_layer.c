@@ -17,6 +17,8 @@ unsigned char timeout = 0;
 unsigned char information_frame = I0;
 unsigned char frameCnt = 0;
 unsigned char totalRejCount = 0;
+unsigned sz = 0;
+unsigned currentTransmission = 0;
 
 ////////////////////////////////////////////////
 // LLOPEN
@@ -211,7 +213,7 @@ int llwrite(const unsigned char *buf, int bufSize)
     infoFrame[j++] = bcc2;
     infoFrame[j] = F;
 
-    int currentTransmission = 0;
+    currentTransmission = 0;
     int accepted = 0;
 
     while (currentTransmission < nRetransmissions){
@@ -312,7 +314,7 @@ unsigned char getControlInfo(){
 ////////////////////////////////////////////////
 int llread(unsigned char *packet)
 {
-    int sz = read_p(fd, information_frame, packet);
+    sz = read_p(fd, information_frame, packet);
 
     frameCnt++;
 
@@ -367,6 +369,19 @@ int llread(unsigned char *packet)
 int llclose(int showStatistics)
 {
     
+
+    // If the user wants to see the statistics, print them
+    if (showStatistics)
+    {
+        printf("\n\n\nStatistics:\n");
+        printf("File size: %ld\n", sz);
+
+            printf("Frames sent: %d\n", currentTransmission);
+            printf("Total number of alarms: %d\n",alarmCnt);
+            printf("Frames read: %d\n", frameCnt);
+            printf("Number of rejection/ repeted information %d\n", totalRejCount);
+    }
+
     int clstat = closeSerialPort();
     return clstat;
 }
