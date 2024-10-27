@@ -39,7 +39,6 @@ typedef struct
 #define RR0 (0x05)
 #define RR1 (0x85)
 #define REJ0 (0x01)
-#defin  
 #define STUFFED_ESC (0x5d)
 
 

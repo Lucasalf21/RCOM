@@ -202,9 +202,38 @@ int llwrite(const unsigned char *buf, int bufSize)
     infoFrame[j++] = bcc2;
     infoFrame[j] = F;
 
-    
+    int currentTransmission = 0;
+    int accepted = 0;
 
-    return 0;
+    while (currentTransmission < nRetransmissions){
+        alarmEnabled = FALSE;
+        alarm(timeout);
+        while (alarmEnabled == FALSE && !accepted){
+            write(fd, infoFrame, frameSize);
+            unsigned char res = getControlInfo(fd); //needs to be implemented
+
+            if (!res){
+                continue;
+            } else if (res == RR0 || res == RR1){
+                accepted = 1;
+                Tx = (Tx + 1) % 2;
+                break;
+            }
+        }
+        if (accepted){
+            break;
+        }
+        currentTransmission++;
+    }
+
+    free(infoFrame);
+    
+    if (!accepted){
+        llclose(fd);
+        return -1;
+    }
+
+    return frameSize;
 }
 
 ////////////////////////////////////////////////
@@ -223,7 +252,7 @@ int llread(unsigned char *packet)
     if (sz == -1)
     {
 
-        printf("Repeted information! Resending response!\n");
+        printf("Repeated information! Resending response!\n");
         if (information_frame == I0)
             write_RR(fd, I0);
         else
