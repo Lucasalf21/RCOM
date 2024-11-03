@@ -4,6 +4,11 @@
 #ifndef _LINK_LAYER_H_
 #define _LINK_LAYER_H_
 
+// SIZE of maximum acceptable payload.
+// Maximum number of bytes that application layer should send to link layer
+#define MAX_PAYLOAD_SIZE 1000
+#define MAX_SIZE 64
+
 typedef enum
 {
     LlTx,
@@ -21,18 +26,41 @@ typedef struct
 
 typedef struct 
 {
-    unsigned char Flag;
+     unsigned char Flag;
     unsigned char Adress_transmiter;
     unsigned char Control_Field;
     unsigned char BCC;
     unsigned char Flag_end;
     unsigned char data[5];
+    
 } Frame;
 
+typedef struct 
+{
+    unsigned char T;
+    unsigned char L;
+    unsigned char V;
+}TLV;
 
-// SIZE of maximum acceptable payload.
-// Maximum number of bytes that application layer should send to link layer
-#define MAX_PAYLOAD_SIZE 1000
+
+typedef struct 
+{
+    unsigned char controlField;
+    TLV tlv[MAX_SIZE];
+} Packet;
+
+typedef struct 
+{
+    unsigned char controlField;
+    unsigned char numberSequence;
+    unsigned char L2;
+    unsigned char L1;
+    unsigned char data[MAX_PAYLOAD_SIZE];
+
+}DataPacket;
+
+
+
 
 // MISC
 #define FALSE 0

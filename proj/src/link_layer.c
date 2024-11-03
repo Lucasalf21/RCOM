@@ -5,13 +5,17 @@
 #include "header.h"
 #include "aux.h"
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+
 // MISC
 #define _POSIX_SOURCE 1 // POSIX compliant source
 
 
-extern unsigned char alarmEnabled = FALSE;
-extern unsigned char alarmCnt = 0;
-unsigned char fd;
+int alarmEnabled = FALSE;
+int alarmCnt = 0;
 unsigned char nRetransmissions = 0;
 unsigned char timeout = 0;
 unsigned char information_frame = I0;
@@ -19,13 +23,14 @@ unsigned char frameCnt = 0;
 unsigned char totalRejCount = 0;
 unsigned sz = 0;
 unsigned currentTransmission = 0;
+LinkLayer cpy;
 
 ////////////////////////////////////////////////
 // LLOPEN
 ////////////////////////////////////////////////
 int llopen(LinkLayer connectionParameters)
 {
-    if (fd = openSerialPort(connectionParameters.serialPort, connectionParameters.baudRate) < 0)
+    if (openSerialPort(connectionParameters.serialPort, connectionParameters.baudRate) < 0)
     {
         return -1;
     }
@@ -36,17 +41,18 @@ int llopen(LinkLayer connectionParameters)
     Frame frame;
     nRetransmissions = connectionParameters.nRetransmissions;
     timeout = connectionParameters.timeout;
-
+    cpy = connectionParameters;
     while(state != STOP && alarmCnt < 3)// 3 is number specified to the number of tries
     {
 
         if(alarmEnabled == FALSE && connectionParameters.role == LlTx)
         {
+            write_SUD(CONTROL_SET);
             alarm(4);
             alarmEnabled = TRUE;
         }
 
-        read(fd, bf, 1);
+        readByteSerialPort(bf);
 
 
         if(connectionParameters.role = LlRx)
@@ -66,7 +72,7 @@ int llopen(LinkLayer connectionParameters)
                 if (bf[0] == TRANSMITTER_ADDRESS)
                 {
                     state = A;
-                    frame.A = TRANSMITTER_ADDRESS; 
+                    frame.Adress_transmiter = TRANSMITTER_ADDRESS; 
                 }
                 else
                     state = START;
@@ -76,7 +82,7 @@ int llopen(LinkLayer connectionParameters)
             case A:
                 if (bf[0] == control)
                     {state = C;
-                    frame.C = control;}
+                    frame.Control_Field = control;}
                 else if (bf[0] == FLAG)
                     {state = FLAG;}
                 else
@@ -99,7 +105,7 @@ int llopen(LinkLayer connectionParameters)
             case BCC1:
                 if (bf[0] == F)
                 {
-                    frame.END_Flag = F;
+                    frame.Flag_end = F;
                     state = STOP;
                     alarm(0);
                 }
@@ -111,12 +117,12 @@ int llopen(LinkLayer connectionParameters)
                 break;
             }
 
-            int bytes = write(fd, bf, 5);
+            int bytes = write_SUD(CONTROL_UA);
         }
 
-        if(connectionParameters.role = LlTx)
+        if(connectionParameters.role = LlRx)
         {
-            int control = 0x07;
+            int control = CONTROL_SET;
 
             switch (state)
             {
@@ -172,7 +178,7 @@ int llopen(LinkLayer connectionParameters)
 
     
 
-    return 1;
+    return 0;
 }
 
 ////////////////////////////////////////////////
@@ -220,7 +226,7 @@ int llwrite(const unsigned char *buf, int bufSize)
         alarmEnabled = FALSE;
         alarm(timeout);
         while (alarmEnabled == FALSE && !accepted){
-            write(fd, infoFrame, frameSize);
+            writeBytesSerialPort(infoFrame, frameSize);
             unsigned char res = getControlInfo();
 
             if (!res){
@@ -247,74 +253,14 @@ int llwrite(const unsigned char *buf, int bufSize)
     return frameSize;
 }
 
-unsigned char getControlInfo(){
-    unsigned char byte, c;
-    enum State state = START;
 
-    while (state != STOP){
-        if (read(fd, &byte, 1) > 0){
-            switch (state){
-                case START:
-                    if (byte == F){
-                        state = FLAG;
-                    }
-                    break;
-                
-
-                case FLAG:
-                    if (byte == RECEIVER_ADDRESS){
-                        state = A;
-                    } else if (byte != F){
-                        state = START;
-                    }
-                    break;
-
-                case A:
-                    if (byte == RR0 || byte == RR1 || byte == REJ0 || byte == REJ1 || byte == DISC){
-                        state = C;
-                        c = byte;
-                    } else if (byte == F){
-                        state = FLAG;
-                    } else{
-                        state = START;
-                    }
-                    break;
-
-                case C:
-                    if (byte == (c ^ RECEIVER_ADDRESS)){
-                        state = BCC1;
-                    } else if (byte == F){
-                        state = FLAG;
-                    } else{
-                        state = START;
-                    }
-                    break;
-
-                case BCC1:
-                    if (byte == F){
-                        state = STOP;
-                    } else{
-                        state = START;
-                    }
-                    break;
-
-                default:
-                    break;
-            }
-        } else{
-            return 0;
-        }
-    }
-
-    return c;
-}
 
 ////////////////////////////////////////////////
 // LLREAD
 ////////////////////////////////////////////////
 int llread(unsigned char *packet)
 {
-    sz = read_p(fd, information_frame, packet);
+    sz = read_p(information_frame, packet);
 
     frameCnt++;
 
@@ -327,9 +273,9 @@ int llread(unsigned char *packet)
 
         printf("Repeated information! Resending response!\n");
         if (information_frame == I0)
-            write_RR(fd, I0);
+            write_RR(I0);
         else
-            write_RR(fd, I1);
+            write_RR(I1);
             totalRejCount++;
             return -1;
     }
@@ -342,7 +288,7 @@ int llread(unsigned char *packet)
     if(BCC2 == packet[sz])
     {
 
-        write_RR(fd, information_frame);
+        write_RR(information_frame);
 
         if (information_frame == I0)
             information_frame = I1;
@@ -354,7 +300,7 @@ int llread(unsigned char *packet)
     else
     {
         printf("Deu porcaria!!!\n");
-        write_REJ(fd, information_frame);
+        write_REJ(information_frame);
         totalRejCount++;
         return -1;
     }
@@ -369,12 +315,44 @@ int llread(unsigned char *packet)
 int llclose(int showStatistics)
 {
     
+    if (cpy.role == LlTx)
+    {
+        alarmEnabled = FALSE;
+        alarmCnt = 0;
+
+
+        // Try to close the connection until the alarm tries exceed the maximum
+        while (alarmCnt < 4)
+        {
+
+            // If the alarm is not enabled yet, send a DISC frame
+            if (alarmEnabled == FALSE)
+            {
+                write_SUD(CONTROL_DISC);
+                alarmEnabled = TRUE;
+                alarm(4);
+            }
+
+            // Wait for a DISC frame to send a UA frame
+            if (!read_disc(&alarmEnabled))
+            {
+                write_SUD(CONTROL_UA);
+                printf("Closed successfuly\n");
+                break;
+            }
+        }
+        if (alarmCnt >= 4)
+        {
+            printf("Timed exeded!\n");
+            return 1;
+        }
+    }
 
     // If the user wants to see the statistics, print them
     if (showStatistics)
     {
         printf("\n\n\nStatistics:\n");
-        printf("File size: %ld\n", sz);
+        printf("File size: %d\n", sz);
 
             printf("Frames sent: %d\n", currentTransmission);
             printf("Total number of alarms: %d\n",alarmCnt);
