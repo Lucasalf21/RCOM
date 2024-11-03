@@ -1,18 +1,211 @@
-#include "header.h"
 #include "aux.h"
+#include "header.h"
 
-int alarmEnabled = FALSE;
-int alarmCnt = 0;
+#include <stdio.h>
+#include <string.h>
+
+
 Frame frame;
 
-void alarmHandler(int signal)
+void alarmHandler(int signal, int* alarmCnt, int* alarmEnabled)
 {
     alarmEnabled = FALSE;
     alarmCnt++;
     printf("Alarm #%d\n", alarmCnt);
 }
 
-unsigned char read_p(int fd, int information_frame, unsigned char *packet)
+unsigned char getControlInfo(){
+    unsigned char byte, c;
+    enum State state = START;
+
+    while (state != STOP){
+        if (readByteSerialPort(&byte) > 0){
+            switch (state){
+                case START:
+                    if (byte == F){
+                        state = FLAG;
+                    }
+                    break;
+                
+
+                case FLAG:
+                    if (byte == RECEIVER_ADDRESS){
+                        state = A;
+                    } else if (byte != F){
+                        state = START;
+                    }
+                    break;
+
+                case A:
+                    if (byte == RR0 || byte == RR1 || byte == REJ0 || byte == REJ1 || byte == DISC){
+                        state = C;
+                        c = byte;
+                    } else if (byte == F){
+                        state = FLAG;
+                    } else{
+                        state = START;
+                    }
+                    break;
+
+                case C:
+                    if (byte == (c ^ RECEIVER_ADDRESS)){
+                        state = BCC1;
+                    } else if (byte == F){
+                        state = FLAG;
+                    } else{
+                        state = START;
+                    }
+                    break;
+
+                case BCC1:
+                    if (byte == F){
+                        state = STOP;
+                    } else{
+                        state = START;
+                    }
+                    break;
+
+                default:
+                    break;
+            }
+        } else{
+            return 0;
+        }
+    }
+
+    return c;
+}
+int read_disc(int *alarmEnabled)
+{
+    alarmEnabled = TRUE;
+    enum State state = START;
+    unsigned char buf[BUF_SIZE + 1] = {0};
+    while (state != STOP && alarmEnabled)
+    {
+        // Returns after 5 chars have been input
+        readByteSerialPort(buf);
+        switch (state)
+        {
+        case START:
+            if (buf[0] == FLAG)
+                state = FLAG;
+
+            break;
+        case FLAG:
+
+            if (buf[0] == TRANSMITTER_ADDRESS)
+                state = A;
+            else if (buf[0] == FLAG)
+                break;
+            else
+                state = START;
+            break;
+
+        case A:
+            if (buf[0] == (CONTROL_DISC))
+                state = C;
+            else if (buf[0] == F)
+                state = FLAG;
+            else
+                state = START;
+
+            break;
+        case C:
+
+            if (buf[0] == (TRANSMITTER_ADDRESS ^ CONTROL_DISC))
+                state = BCC1;
+            else if (buf[0] == F)
+                state = FLAG;
+            else
+                state = START;
+            break;
+        case BCC1:
+
+            if (buf[0] == FLAG)
+            {
+                alarm(0);
+                return 0;
+            }
+            else
+            {
+                state = START;
+            }
+            break;
+        default:
+            break;
+        }
+    }
+    return 1;
+}
+
+Packet write_control(unsigned char control, const char *filename, long filesize)
+{
+    Packet pckt;
+
+
+    // Push the C related to the control (START or END)
+    pckt.controlField = control;
+
+    unsigned char size = 0;
+    long aux = filesize;
+    while(aux>0){
+        aux/=256;
+        size++;
+    }
+    //size++;
+    // Push the T related to the filesize
+    pckt.tlv[0].T = T_SIZE;
+    // Push the size(V) of the filesize
+    pckt.tlv[0].V = size;
+    // getting the last two bytes of the filesize, and pushing them always after the size
+    while (size > 0)
+    {
+        pckt.tlv[0].L = (unsigned char)filesize % 256;
+        filesize /= 256;
+        size--;
+    }
+
+    // If there is a filename, push it
+    if (*filename != '\0')
+    {
+
+        // Push the T related to the filename
+        pckt.tlv[1].T = T_NAME;
+        // Push the size(V) of the filename
+        pckt.tlv[1].V = strlen(filename);
+        // Push the filename
+        for (int i = 0; i < strlen(filename); i++)
+        {
+            pckt.tlv[1].L = filename[1];
+        }
+    }
+
+    return pckt;
+}
+
+DataPacket write_data(unsigned char *buf, int bufSize)
+{
+    DataPacket pckt;
+
+
+    unsigned char l2 = bufSize / 256;
+    unsigned char l1 = bufSize % 256;
+    
+    pckt.controlField = CONTROL_DATA;
+
+    pckt.L2 = l2;
+
+    pckt.L1 = l1;
+
+    for (int i = 0; i < bufSize; i++)
+    {
+        pckt.data[i] = buf[i];
+    }
+
+    return pckt;
+}
+
+unsigned char read_p(int information_frame, unsigned char *packet)
 {
     // information frame that is received in the package
     unsigned char read_i;
@@ -30,7 +223,7 @@ unsigned char read_p(int fd, int information_frame, unsigned char *packet)
     {
 
         // Returns after 30 seconds without input
-        read(fd, buf, 1);
+        readByteSerialPort(buf);
 
         // Code to defuf a byte
         if (deStuff)
@@ -133,7 +326,7 @@ unsigned char read_p(int fd, int information_frame, unsigned char *packet)
     return size;
 }
 
-unsigned write_RR(unsigned fd, unsigned char information_frame)
+unsigned write_RR(unsigned char information_frame)
 {
 
         frame.data[0] = F;
@@ -149,12 +342,11 @@ unsigned write_RR(unsigned fd, unsigned char information_frame)
         frame.data[3] = (TRANSMITTER_ADDRESS ^ frame.data[2]);
         frame.data[4] = F;
 
-        int bytes = write(fd, frame.data, 5);
+        int bytes = writeByteSerialPort(frame.data, 5);
 
         return 1;
 }
-
-unsigned write_REJ(unsigned fd, int information_frame)
+unsigned write_REJ(int information_frame)
 {
         frame.data[0] = F;
         frame.data[1] = TRANSMITTER_ADDRESS;
@@ -169,12 +361,12 @@ unsigned write_REJ(unsigned fd, int information_frame)
         frame.data[3] = (TRANSMITTER_ADDRESS ^ frame.data[2]);
         frame.data[4] = F;
 
-        int bytes = write(fd, frame.data, 5);
+        int bytes = writeByteSerialPort(frame.data, 5);
 
         return 1;
 
 }
-unsigned write_SUD(unsigned char fd, unsigned char control)
+unsigned write_SUD(unsigned char control)
 {
     frame.data[0] = F;
     frame.data[1] = TRANSMITTER_ADDRESS;
@@ -182,7 +374,7 @@ unsigned write_SUD(unsigned char fd, unsigned char control)
     frame.data[3] = (TRANSMITTER_ADDRESS ^ frame.data[2]);
     frame.data[4] = F;
 
-    int bytes = write(fd, frame.data, 5);
+    int bytes = writeByteSerialPort(frame.data, 5);
 
     return 1;
 
