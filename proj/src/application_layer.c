@@ -24,17 +24,20 @@ int pow_int(int base, int exp) {
     }
     return result;
 }
-int length(const char* str) {
-    int len = 0;
-    while (str[len] != '\0') len++;
-    return len;
-}
-int tlv_length(TLV* data[])
+unsigned int calculate_file_size(const char *filename)
 {
-    int len = 0;
-    while (data[len] != '\0') len++;
-    return len;
+    size_t file_size = 0;
+    FILE *fp = fopen(filename, "r");
+    
+    if (fp != NULL) {
+        fseek(fp, 0, SEEK_END);
+        file_size = ftell(fp);
+        fclose(fp);
+    }
+    
+    return file_size;
 }
+
 
 
 void applicationLayer(const char *serialPort, const char *role, int baudRate, int nTries, int timeout, const char *filename)
@@ -51,7 +54,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
         ll.role = LlRx;
     strcpy(ll.serialPort, serialPort);
     ll.timeout = timeout;
-
+    
     // Connecting to serial port
     if (llopen(ll))
     {
@@ -59,8 +62,8 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
         return;
     }
     printf("Connected\n");
-    start = time(NULL);
-
+    //start = time(NULL);
+    
     // Receiving File
     if (ll.role == LlRx)
     {
@@ -74,7 +77,9 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
         // Read until the first start control packet is received
         do
         {
+            printf("passei aqui!");
             llread(packet);
+            
         } while (packet[0] != CONTROL_FIELD_PACKET_START);
         
         if (packet[1] == 0x00)
@@ -110,6 +115,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
         FILE *file;
         if(packet[1] == 1) file = fopen(filename, "wb");
         else file = fopen(name, "wb");
+       
         if (file == NULL)
         {
             printf("Error: Unable to create or open the file %s for writing.\n", filename);
@@ -160,7 +166,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
     // Sending File
     else
     {
-
+        
         // Opening file to read.
         FILE *file = fopen(filename, "rb");
         if (file == NULL)
@@ -168,6 +174,8 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
             printf("Error: Unable to open the file %s for reading.\n", filename);
             return;
         }
+
+
 
         // Get file size
         fseek(file, 0, SEEK_END);
@@ -181,11 +189,11 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
         fileSize = fileLength;
         Packet pckt = write_control(CONTROL_FIELD_PACKET_START, filename, fileSize);
         DataPacket dataPckt;
-        unsigned max = tlv_length(pckt.tlv);
-        unsigned size = 1 + max * 3;
-        unsigned char data[size];
+        
+        unsigned char data[fileSize];
+        int cnt = 0;
         char a = 1;
-        for(unsigned i = 0; i <= max; i++){
+        for(unsigned i = 0; i <= fileSize; i++){
             if(a == 1){
                 a = 0;
                 data[i] = pckt.controlField;
@@ -194,13 +202,14 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
             data[i++] = pckt.tlv->T;
             data[i++] = pckt.tlv->L;
             data[i++] = pckt.tlv->V;
+            cnt += i;
         }
-        if (llwrite(data, size))
+        if (llwrite(data, cnt))
         {
             printf("Time exeded\n");
             return;
         }
-
+        printf("cheguei aqui!");
         // Send data packets until all the bytes are sent
         while (fileLength > 0)
         {
@@ -215,7 +224,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
 
             fileLength -= bytesRead;
             dataPckt = write_data(buffer, bytesRead);
-            if (llwrite(dataPckt.data, length(dataPckt.data)))
+            if (llwrite(dataPckt.data, MAX_PAYLOAD_SIZE))
             {
                 printf("timed exeded\n");
                 return;
@@ -224,10 +233,9 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
 
         // Send end control packet
         pckt = write_control(CONTROL_FIELD_PACKET_END, filename, fileSize);
-        max = tlv_length(pckt.tlv);
-        size = 1 + max * 3;
         a = 1;
-        for(unsigned i = 0; i <= max; i++){
+        cnt = 0;
+        for(unsigned i = 0; i <= fileSize; i++){
             if(a == 1){
                 a = 0;
                 data[i] = pckt.controlField;
@@ -236,8 +244,9 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
             data[i++] = pckt.tlv->T;
             data[i++] = pckt.tlv->L;
             data[i++] = pckt.tlv->V;
+            cnt += i;
         }
-        llwrite(data, size);
+        llwrite(data, cnt);
 
         printf("All bytes were written\n");
 

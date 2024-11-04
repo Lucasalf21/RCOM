@@ -28,155 +28,124 @@ LinkLayer cpy;
 ////////////////////////////////////////////////
 // LLOPEN
 ////////////////////////////////////////////////
+void alarmHandler(int signal)
+{
+    alarmEnabled = FALSE;
+    alarmCnt++;
+    printf("Alarm #%d\n", alarmCnt);
+}
+
 int llopen(LinkLayer connectionParameters)
 {
     if (openSerialPort(connectionParameters.serialPort, connectionParameters.baudRate) < 0)
     {
         return -1;
     }
+
+
     (void) signal(SIGALRM, alarmHandler);
     alarmCnt = 0;
     enum State state = START; 
-    unsigned char bf[BUF_SIZE + 1] = {0};
-    Frame frame;
+    unsigned char bf = 0;
+    unsigned bytes;
     nRetransmissions = connectionParameters.nRetransmissions;
     timeout = connectionParameters.timeout;
     cpy = connectionParameters;
-    while(state != STOP && alarmCnt < 3)// 3 is number specified to the number of tries
-    {
+    int control = 0;
 
-        if(alarmEnabled == FALSE && connectionParameters.role == LlTx)
+
+    while (state != STOP && alarmCnt < connectionParameters.nRetransmissions )
+    {   
+
+        if (alarmEnabled == FALSE && connectionParameters.role == LlTx)
         {
-            write_SUD(CONTROL_SET);
-            alarm(4);
+            bytes = write_SUD(CONTROL_SET);
+            alarm(connectionParameters.timeout);
             alarmEnabled = TRUE;
+        } 
+        
+        if (connectionParameters.role == LlTx)
+        {
+            control = CONTROL_UA;
+        }
+        else
+        {
+            control = CONTROL_SET;
         }
 
-        readByteSerialPort(bf);
-
-
-        if(connectionParameters.role = LlRx)
+        if(readByteSerialPort(&bf)  > 0)
         {
-            int control = 0x03;
+        // Check the state machine
+        printf("%u\n",bf);
+        switch (state)
+        {
+        // Confirm that the first byte is a FLAG
+        case START:
+            if (bf == F)
+                state = FLAG;
 
-            switch (state)
+            break;
+
+        // Confirm that the second byte is the adress of the transmitter. If not, go back to the start state
+        case FLAG:
+            if (bf == TRANSMITTER_ADDRESS)
+                state = A;
+            else if (bf == F)
+                break;
+            else
+                state = START;
+            break;
+
+        // Confirm that the third byte is the control byte that the receiver is expecting. If not, go back to the start state.
+        case A:
+            if (bf== control)
+                state = C;
+            else if (bf == F)
+                state = FLAG;
+            else
+                state = START;
+            break;
+
+        // Confirm that the fourth byte is the XOR of the adress and the control bytes to confirm that the frame is valid. If not, go back to the first state.
+        case C:
+            if (bf == (TRANSMITTER_ADDRESS ^ control))
+                state = BCC1;
+            else if (bf == F)
+                state = FLAG;
+            else
+                state = START;
+            break;
+
+        // Confirm that the fifth byte is a flag. If it it, then we set an alarm and we quit from the while. If not, go back to the start state.
+        case BCC1:
+            if (bf == F)
             {
-                
-            case START:
-                if (bf[0] == F)
-                    state = FLAG;
-                    frame.Flag = F;
-                break;
-
-            case FLAG:
-                if (bf[0] == TRANSMITTER_ADDRESS)
-                {
-                    state = A;
-                    frame.Adress_transmiter = TRANSMITTER_ADDRESS; 
-                }
-                else
-                    state = START;
-                    memset(&frame, 0, sizeof(Frame));
-                break;
-
-            case A:
-                if (bf[0] == control)
-                    {state = C;
-                    frame.Control_Field = control;}
-                else if (bf[0] == FLAG)
-                    {state = FLAG;}
-                else
-                    {state = START;
-                    memset(&frame, 0, sizeof(Frame));
-}
-                break;
-
-            case C:
-                if (bf[0] == (0x03 ^ control))
-                    {state = BCC1;
-                    frame.BCC = bf[0];}
-                else if (bf[0] == FLAG)
-                    state = FLAG;
-                else
-                    state = START;
-                    memset(&frame, 0, sizeof(Frame));
-                break;
-
-            case BCC1:
-                if (bf[0] == F)
-                {
-                    frame.Flag_end = F;
-                    state = STOP;
-                    alarm(0);
-                }
-                else
-                    state = START;
-                    memset(&frame, 0, sizeof(Frame));
-                break;
-            default:
+                state = STOP;
+                alarm(0);
                 break;
             }
-
-            int bytes = write_SUD(CONTROL_UA);
-        }
-
-        if(connectionParameters.role = LlRx)
-        {
-            int control = CONTROL_SET;
-
-            switch (state)
-            {
-                
-            case START:
-                if (bf[0] == F)
-                    state = FLAG;
-
-                break;
-
-            case FLAG:
-                if (bf[0] == TRANSMITTER_ADDRESS)
-                    state = A;
-                else if (bf[0] == FLAG)
-                    break;
-                else
-                    state = START;
-                break;
-
-            case A:
-                if (bf[0] == control)
-                    state = C;
-                else if (bf[0] == FLAG)
-                    state = FLAG;
-                else
-                    state = START;
-                break;
-
-            case C:
-                if (bf[0] == (0x03 ^ control))
-                    state = BCC1;
-                else if (bf[0] == FLAG)
-                    state = FLAG;
-                else
-                    state = START;
-                break;
-
-            case BCC1:
-                if (bf[0] == F)
-                {
-                    state = STOP;
-                    alarm(0);
-                }
-                else
-                    state = START;
-                break;
-            default:
-                break;
-            }
+            else
+                state = START;
+            break;
+        default:
+            break;
         }
         
+        }
+    }
+     
+     
+     if (connectionParameters.role == LlRx)
+    {
+        write_SUD(CONTROL_UA);
     }
 
-    
+    alarmCnt = 0;
+ 
+    // If the alarm tries exceeded the maximum, return 1
+    if (alarmCnt >= connectionParameters.nRetransmissions)return 1;
+    // Wait until all bytes have been written to the serial port
+    sleep(1);
 
     return 0;
 }
@@ -186,7 +155,42 @@ int llopen(LinkLayer connectionParameters)
 ////////////////////////////////////////////////
 
 unsigned char Tx = 0;
+int llwrite(const unsigned char *bf, int bufSize)
+{
 
+    if (bufSize <= 0)
+        return 1;
+    alarmEnabled = FALSE;
+    alarmCnt = 0;
+
+    int res = 0;
+
+    while (alarmCnt < cpy.timeout)
+    {
+
+        if (alarmEnabled == FALSE || res == -1)
+        {
+            write_inf_frame(bf, bufSize, information_frame);
+            frameCnt++;
+            alarm(cpy.timeout);
+            alarmEnabled = TRUE;
+        }
+
+        res = read_frame_resp(information_frame , &alarmEnabled);
+
+        if (res == 0)
+        {
+            if (information_frame == I0)
+                information_frame = I1;
+            else
+                information_frame = I0;
+            return 0;
+        }
+    }
+
+    return 1;
+}
+/*
 int llwrite(const unsigned char *buf, int bufSize)
 {
     int frameSize = bufSize + 6;
@@ -222,7 +226,7 @@ int llwrite(const unsigned char *buf, int bufSize)
     currentTransmission = 0;
     int accepted = 0;
 
-    while (currentTransmission < nRetransmissions){
+    while (currentTransmission < cpy.nRetransmissions){
         alarmEnabled = FALSE;
         alarm(timeout);
         while (alarmEnabled == FALSE && !accepted){
@@ -246,12 +250,12 @@ int llwrite(const unsigned char *buf, int bufSize)
     free(infoFrame);
     
     if (!accepted){
-        llclose(fd);
+        llclose(1);
         return -1;
     }
 
     return frameSize;
-}
+}*/
 
 
 

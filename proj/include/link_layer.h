@@ -32,6 +32,7 @@ typedef struct
     unsigned char BCC;
     unsigned char Flag_end;
     unsigned char data[5];
+    unsigned char size;
     
 } Frame;
 
@@ -46,7 +47,7 @@ typedef struct
 typedef struct 
 {
     unsigned char controlField;
-    TLV tlv[MAX_SIZE];
+    TLV tlv[MAX_PAYLOAD_SIZE];
 } Packet;
 
 typedef struct 
@@ -55,7 +56,7 @@ typedef struct
     unsigned char numberSequence;
     unsigned char L2;
     unsigned char L1;
-    unsigned char data[MAX_PAYLOAD_SIZE];
+    unsigned char data[MAX_PAYLOAD_SIZE+5];
 
 }DataPacket;
 

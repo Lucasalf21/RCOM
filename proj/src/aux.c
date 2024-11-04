@@ -7,13 +7,6 @@
 
 Frame frame;
 
-void alarmHandler(int signal, int* alarmCnt, int* alarmEnabled)
-{
-    alarmEnabled = FALSE;
-    alarmCnt++;
-    printf("Alarm #%d\n", alarmCnt);
-}
-
 unsigned char getControlInfo(){
     unsigned char byte, c;
     enum State state = START;
@@ -138,50 +131,269 @@ int read_disc(int *alarmEnabled)
     return 1;
 }
 
+void frame_stuff(Frame *frame1)
+{
+
+    int i = 4; // packet size
+
+    // Going through the packet
+    while (i < frame1->size)
+    {
+
+        unsigned char c = frame1->data[i];
+
+        // To stuff the flag we need to add 0x7d and 0x5e
+        if (c == F)
+        {
+            frame1->data[i] = 0x7d;
+            frame1->data[i+1] = 0x5e;
+            i++;
+        }
+        // To stuff the escape we need to add 0x7d and 0x5d
+        else if (c == ESC)
+        {
+            frame1->data[i] = 0x7d;
+            frame1->data[i+1] = 0x5d;
+            i++;
+        }
+
+        i++;
+    }
+}
+
+int write_inf_frame(const unsigned char *bf, int bufSize, unsigned char information_frame)
+{
+    Frame frame1;
+    frame1.data[0] = F;
+    frame1.data[1] = TRANSMITTER_ADDRESS;
+
+    // Identificando o tipo do quadro (information_frame)
+    if (information_frame == 0)
+        frame1.data[2] = I0;
+    else
+        frame1.data[2] = I1;
+
+    frame1.data[3] = TRANSMITTER_ADDRESS ^ frame1.data[2];
+    frame1.size = 4;
+    unsigned char BCC2 = 0;
+
+    printf("Iniciando write_inf_frame\n");
+    printf("Flag inicial: 0x%x, Endereço: 0x%x, Tipo de quadro: 0x%x\n", F, TRANSMITTER_ADDRESS, frame1.data[2]);
+    printf("BCC inicial: 0x%x\n", frame1.data[3]);
+
+    // Enquanto ainda há dados para empurrar, calculando o BCC2 e adicionando ao frame
+    while (bufSize > 0)
+    {
+        BCC2 ^= *bf;
+        frame1.data[frame1.size] = *bf;
+        printf("Byte adicionado ao frame: 0x%x, Novo BCC2: 0x%x\n", *bf, BCC2);
+        bf++;
+        bufSize--;
+        frame1.size++;
+    }
+
+    frame1.data[frame1.size] = BCC2;
+    frame1.size++;
+
+    printf("BCC2 final adicionado ao frame: 0x%x\n", BCC2);
+    printf("Tamanho do frame antes do stuffing: %u\n", frame1.size);
+
+    // Realizando stuffing no frame (sem a FLAG)
+    frame_stuff(&frame1);
+
+    frame1.data[frame1.size] = F;
+    frame1.size++;
+
+    printf("Frame completo após stuffing (incluindo FLAG final):\n");
+    for (int i = 0; i < frame1.size; i++) {
+        printf("0x%x ", frame1.data[i]);
+    }
+    printf("\n");
+
+    int bytes = writeBytesSerialPort(frame1.data, frame1.size);
+    printf("%d bytes escritos na porta serial\nTamanho final do frame: %u\n", bytes, frame1.size);
+
+    return 1;
+}
+
+
+int read_frame_resp(int information_frame, unsigned *alarmEnabled)
+{
+    // response
+    unsigned char res = 0;
+
+    // Current state of the machine state
+    enum State state = START;
+    unsigned char bf = 0;
+
+    // Adicionando printf para acompanhar o estado e valores importantes
+    printf("Iniciando read_frame_resp\n");
+
+    while (state != STOP && alarmEnabled)
+    {
+        // Returns after 30 seconds without input
+        readByteSerialPort(bf);
+
+        // state machine
+        switch (state)
+        {
+        case START:
+            //printf("Estado START\n");
+
+            // first state
+            if (bf == F)
+                state = FLAG;
+
+            break;
+
+        case FLAG:
+            printf("Estado FLAG\n");
+
+            // state after receiving a flag
+            if (bf == TRANSMITTER_ADDRESS)
+                state = A;
+            else if (bf == F)
+                // if a flag is received we should stay in this state
+                break;
+            else
+                // if a invalid byte is read we should go back to the start
+                state = START;
+            break;
+
+        case A:
+            printf("Estado A\n");
+
+            // State after receiving the Address
+            if (bf == RR1 || bf == RR0 || bf == REJ0 || bf == REJ1)
+            {
+                // A valid response was read, we store it and deal with it later
+                res = bf;
+                state = C;
+            }
+            else if (bf == F)
+            {
+                state = FLAG;
+            }
+            else
+            {
+                // invalid data we go back to the beginning
+                state = START;
+            }
+            break;
+
+        case C:
+            printf("Estado C\n");
+
+            // State after receiving a control (response)
+            if (bf == (TRANSMITTER_ADDRESS ^ res))
+                state = BCC1;
+            else if (bf == F)
+                state = FLAG;
+            else
+                state = START;
+            break;
+
+        case BCC1:
+            printf("Estado BCC1\n");
+
+            // state after verifying if the BCC1 is OK
+            if (bf == F)
+            {
+                printf("Pacote recebido com FLAG final. Desativando alarme.\n");
+                // disable alarm
+                alarm(0);
+
+                // A flag signals the end of the package sent
+
+                // the response was a reject, we signal an error to the link layer
+                if (res == REJ1 || res == REJ0)
+                {
+                    printf("Resposta de rejeição recebida. Retornando erro.\n");
+                    return -1;
+                }
+                // the receiver is waiting for the current information frame, an error has occurred
+                if ((res == RR0 && information_frame == I0) || (res == RR1 && information_frame == I1))
+                {
+                    printf("Erro: o quadro de informação atual ainda está pendente. Retornando erro.\n");
+                    return -1;
+                }
+
+                // Else we send a positive response
+                printf("Resposta positiva recebida. Retornando sucesso.\n");
+                return 0;
+            }
+            else
+            {
+                state = START;
+            }
+            break;
+
+        default:
+            printf("Estado desconhecido.\n");
+            break;
+        }
+    }
+    printf("Saindo de read_frame_resp, retornando 1.\n");
+    return 1;
+}
+
+
 Packet write_control(unsigned char control, const char *filename, long filesize)
 {
     Packet pckt;
 
-
-    // Push the C related to the control (START or END)
+    // Definindo o campo de controle
     pckt.controlField = control;
+    printf("Campo de controle: 0x%x\n", control);
 
+    // Calculando o número de bytes necessários para representar o tamanho do arquivo
     unsigned char size = 0;
     long aux = filesize;
-    while(aux>0){
-        aux/=256;
+    while (aux > 0) {
+        aux /= 256;
         size++;
     }
-    //size++;
-    // Push the T related to the filesize
+
+    printf("Número de bytes para representar filesize: %d\n", size);
+
+    // Configurando TLV para o tamanho do arquivo
     pckt.tlv[0].T = T_SIZE;
-    // Push the size(V) of the filesize
     pckt.tlv[0].V = size;
-    // getting the last two bytes of the filesize, and pushing them always after the size
-    while (size > 0)
-    {
+
+    printf("Tamanho do arquivo (filesize): %ld\n", filesize);
+    printf("Tamanho (V) do campo filesize: %d bytes\n", size);
+
+    // Inserindo cada byte do tamanho do arquivo
+    while (size > 0) {
         pckt.tlv[0].L = (unsigned char)filesize % 256;
+        printf("Byte de filesize inserido: 0x%x\n", pckt.tlv[0].L);
         filesize /= 256;
         size--;
     }
 
-    // If there is a filename, push it
-    if (*filename != '\0')
-    {
+    // Inserindo o nome do arquivo, se existir
+    if (*filename != '\0') {
+        printf("Nome do arquivo: %s\n", filename);
 
-        // Push the T related to the filename
+        // Tamanho do nome do arquivo
+        int filenameSize = strlen(filename);
+        
+        // Configurando TLV para o nome do arquivo
         pckt.tlv[1].T = T_NAME;
-        // Push the size(V) of the filename
-        pckt.tlv[1].V = strlen(filename);
-        // Push the filename
-        for (int i = 0; i < strlen(filename); i++)
-        {
-            pckt.tlv[1].L = filename[1];
+        pckt.tlv[1].V = filenameSize;
+
+        printf("Tamanho (V) do campo filename: %d bytes\n", filenameSize);
+
+        // Inserindo cada caractere do nome do arquivo
+        for (int i = 0; i < filenameSize; i++) {
+            pckt.tlv[1].L = filename[i];
+            printf("Byte de filename inserido: 0x%x (%c)\n", pckt.tlv[1].L, filename[i]);
         }
     }
 
     return pckt;
 }
+
 
 DataPacket write_data(unsigned char *buf, int bufSize)
 {
@@ -326,7 +538,7 @@ unsigned char read_p(int information_frame, unsigned char *packet)
     return size;
 }
 
-unsigned write_RR(unsigned char information_frame)
+unsigned int write_RR(unsigned char information_frame)
 {
 
         frame.data[0] = F;
@@ -342,11 +554,11 @@ unsigned write_RR(unsigned char information_frame)
         frame.data[3] = (TRANSMITTER_ADDRESS ^ frame.data[2]);
         frame.data[4] = F;
 
-        int bytes = writeByteSerialPort(frame.data, 5);
+        int bytes = writeBytesSerialPort(frame.data, 5);
 
         return 1;
 }
-unsigned write_REJ(int information_frame)
+unsigned int write_REJ(int information_frame)
 {
         frame.data[0] = F;
         frame.data[1] = TRANSMITTER_ADDRESS;
@@ -361,21 +573,35 @@ unsigned write_REJ(int information_frame)
         frame.data[3] = (TRANSMITTER_ADDRESS ^ frame.data[2]);
         frame.data[4] = F;
 
-        int bytes = writeByteSerialPort(frame.data, 5);
+        int bytes = writeBytesSerialPort(frame.data, 5);
 
         return 1;
 
 }
-unsigned write_SUD(unsigned char control)
+void printFrame(Frame frame) {
+    printf("Frame:\n");
+    printf("  Data: ");
+    
+    for (int i = 0; i < 5; i++) {
+        printf("0x%02X ", frame.data[i]);
+    }
+    
+    printf("\n");
+}
+unsigned int write_SUD(unsigned char control)
 {
-    frame.data[0] = F;
-    frame.data[1] = TRANSMITTER_ADDRESS;
-    frame.data[2] = control;
-    frame.data[3] = (TRANSMITTER_ADDRESS ^ frame.data[2]);
-    frame.data[4] = F;
+    Frame frame1;
+    frame1.data[0] = F;
+    frame1.data[1] = TRANSMITTER_ADDRESS;
+    frame1.data[2] = control;
+    frame1.data[3] = (frame1.data[1] ^ frame1.data[2]);
+    frame1.data[4] = F;
 
-    int bytes = writeByteSerialPort(frame.data, 5);
+    unsigned bytes = writeBytesSerialPort(frame1.data, 5);
 
-    return 1;
+    //printf("Quantidade de Bytes: %i\n", bytes);
+
+    return bytes;
 
 }
+
