@@ -137,7 +137,7 @@ void frame_stuff(Frame *frame1)
     int i = 4; // packet size
 
     // Going through the packet
-    while (i < frame1->size)
+    while (i < sizeof(frame1->data))
     {
 
         unsigned char c = frame1->data[i];
@@ -168,41 +168,59 @@ int write_inf_frame(const unsigned char *bf, int bufSize, unsigned char informat
     frame1.data[1] = TRANSMITTER_ADDRESS;
 
     // Identificando o tipo do quadro (information_frame)
-    if (information_frame == 0)
-        frame1.data[2] = I0;
-    else
-        frame1.data[2] = I1;
-
+    frame1.data[2] = (information_frame == 0) ? I0 : I1;
     frame1.data[3] = TRANSMITTER_ADDRESS ^ frame1.data[2];
-    frame1.size = 4;
+
+    int packetSize = 4;  // Começamos a partir da posição 4
     unsigned char BCC2 = 0;
 
-    printf("Iniciando write_inf_frame\n");
-    printf("Flag inicial: 0x%x, Endereço: 0x%x, Tipo de quadro: 0x%x\n", F, TRANSMITTER_ADDRESS, frame1.data[2]);
-    printf("BCC inicial: 0x%x\n", frame1.data[3]);
-
-    // Enquanto ainda há dados para empurrar, calculando o BCC2 e adicionando ao frame
-    while (bufSize > 0)
+    // Processando o buffer bf e calculando BCC2
+    while (bufSize > 0 && packetSize < sizeof(frame1.data) - 1)
     {
         BCC2 ^= *bf;
-        frame1.data[frame1.size] = *bf;
+        frame1.data[packetSize] = *bf;
         printf("Byte adicionado ao frame: 0x%x, Novo BCC2: 0x%x\n", *bf, BCC2);
         bf++;
         bufSize--;
-        frame1.size++;
+        packetSize++;
     }
 
-    frame1.data[frame1.size] = BCC2;
-    frame1.size++;
+    if (bufSize > 0)  // Se não conseguimos adicionar todos os dados
+    {
+        fprintf(stderr, "Error: frame1.data buffer overflow\n");
+        return -1;  // Retorno de erro adequado
+    }
+
+    // Adicionando BCC2 no frame, verificando se há espaço
+    if (packetSize < sizeof(frame1.data) - 1) 
+    {
+        frame1.data[packetSize] = BCC2;
+        packetSize++;
+    } 
+    else 
+    {
+        fprintf(stderr, "Error: frame1.data buffer overflow ao adicionar BCC2\n");
+        return -1;  // Retorno de erro adequado
+    }
 
     printf("BCC2 final adicionado ao frame: 0x%x\n", BCC2);
-    printf("Tamanho do frame antes do stuffing: %u\n", frame1.size);
+    printf("Tamanho do frame antes do stuffing: %u\n", packetSize);
 
-    // Realizando stuffing no frame (sem a FLAG)
+    // Realizando stuffing no frame (exceto FLAG final)
+    frame1.size = packetSize;  // Atualiza o tamanho antes do stuffing
     frame_stuff(&frame1);
 
-    frame1.data[frame1.size] = F;
-    frame1.size++;
+    // Adicionando FLAG final no frame, verificando espaço
+    if (frame1.size < sizeof(frame1.data)) 
+    {
+        frame1.data[frame1.size] = F;
+        frame1.size++;  // Incrementa o tamanho final do frame
+    } 
+    else 
+    {
+        fprintf(stderr, "Error: frame1.data buffer overflow ao adicionar FLAG final\n");
+        return -1;  // Retorno de erro adequado
+    }
 
     printf("Frame completo após stuffing (incluindo FLAG final):\n");
     for (int i = 0; i < frame1.size; i++) {
@@ -215,6 +233,7 @@ int write_inf_frame(const unsigned char *bf, int bufSize, unsigned char informat
 
     return 1;
 }
+
 
 
 int read_frame_resp(int information_frame, unsigned *alarmEnabled)
@@ -341,10 +360,10 @@ int read_frame_resp(int information_frame, unsigned *alarmEnabled)
 Packet write_control(unsigned char control, const char *filename, long filesize)
 {
     Packet pckt;
-
+    long i = 0;
     // Definindo o campo de controle
     pckt.controlField = control;
-    printf("Campo de controle: 0x%x\n", control);
+    pckt.data[i++] = control;
 
     // Calculando o número de bytes necessários para representar o tamanho do arquivo
     unsigned char size = 0;
@@ -354,19 +373,21 @@ Packet write_control(unsigned char control, const char *filename, long filesize)
         size++;
     }
 
-    printf("Número de bytes para representar filesize: %d\n", size);
 
     // Configurando TLV para o tamanho do arquivo
-    pckt.tlv[0].T = T_SIZE;
-    pckt.tlv[0].V = size;
+    pckt.T = T_SIZE;
+    pckt.V = size;
+
+    pckt.data[i++] = T_SIZE;
+    pckt.data[i++] = size;
 
     printf("Tamanho do arquivo (filesize): %ld\n", filesize);
     printf("Tamanho (V) do campo filesize: %d bytes\n", size);
 
     // Inserindo cada byte do tamanho do arquivo
     while (size > 0) {
-        pckt.tlv[0].L = (unsigned char)filesize % 256;
-        printf("Byte de filesize inserido: 0x%x\n", pckt.tlv[0].L);
+        pckt.data[i++] = (unsigned char)filesize % 256;
+        printf("Byte de filesize inserido: 0x%x\n", pckt.data[i++]);
         filesize /= 256;
         size--;
     }
@@ -379,15 +400,14 @@ Packet write_control(unsigned char control, const char *filename, long filesize)
         int filenameSize = strlen(filename);
         
         // Configurando TLV para o nome do arquivo
-        pckt.tlv[1].T = T_NAME;
-        pckt.tlv[1].V = filenameSize;
+        pckt.data[i++] = T_NAME;
+        pckt.data[i++] = filenameSize;
 
-        printf("Tamanho (V) do campo filename: %d bytes\n", filenameSize);
 
         // Inserindo cada caractere do nome do arquivo
         for (int i = 0; i < filenameSize; i++) {
-            pckt.tlv[1].L = filename[i];
-            printf("Byte de filename inserido: 0x%x (%c)\n", pckt.tlv[1].L, filename[i]);
+            pckt.data[i++] = filename[i];
+            printf("Byte de filename inserido: 0x%x (%c)\n", pckt.data[i++], filename[i]);
         }
     }
 

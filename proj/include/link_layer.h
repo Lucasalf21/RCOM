@@ -31,23 +31,18 @@ typedef struct
     unsigned char Control_Field;
     unsigned char BCC;
     unsigned char Flag_end;
-    unsigned char data[5];
+    unsigned char data[MAX_PAYLOAD_SIZE+5];
     unsigned char size;
     
 } Frame;
 
 typedef struct 
 {
+    unsigned char controlField;
     unsigned char T;
     unsigned char L;
     unsigned char V;
-}TLV;
-
-
-typedef struct 
-{
-    unsigned char controlField;
-    TLV tlv[MAX_PAYLOAD_SIZE];
+    unsigned char data[MAX_PAYLOAD_SIZE+5];
 } Packet;
 
 typedef struct 

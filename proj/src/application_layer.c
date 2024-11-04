@@ -175,8 +175,6 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
             return;
         }
 
-
-
         // Get file size
         fseek(file, 0, SEEK_END);
         long fileLength = ftell(file);
@@ -189,26 +187,26 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
         fileSize = fileLength;
         Packet pckt = write_control(CONTROL_FIELD_PACKET_START, filename, fileSize);
         DataPacket dataPckt;
-        
-        unsigned char data[fileSize];
-        int cnt = 0;
+        unsigned max = sizeof(pckt.data);
+        unsigned size = 1 + max * 3;
+        unsigned char data[MAX_PAYLOAD_SIZE];
         char a = 1;
-        for(unsigned i = 0; i <= fileSize; i++){
+        for(unsigned i = 0; i < max; i++){
             if(a == 1){
                 a = 0;
                 data[i] = pckt.controlField;
                 i++;
             }
-            data[i++] = pckt.tlv->T;
-            data[i++] = pckt.tlv->L;
-            data[i++] = pckt.tlv->V;
-            cnt += i;
+            data[i++] = pckt.T;
+            data[i++] = pckt.L;
+            data[i++] = pckt.V;
         }
-        if (llwrite(data, cnt))
+        if (llwrite(data, size))
         {
             printf("Time exeded\n");
             return;
         }
+
         printf("cheguei aqui!");
         // Send data packets until all the bytes are sent
         while (fileLength > 0)
@@ -224,7 +222,7 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
 
             fileLength -= bytesRead;
             dataPckt = write_data(buffer, bytesRead);
-            if (llwrite(dataPckt.data, MAX_PAYLOAD_SIZE))
+            if (llwrite(dataPckt.data, fileSize))
             {
                 printf("timed exeded\n");
                 return;
@@ -233,20 +231,20 @@ void applicationLayer(const char *serialPort, const char *role, int baudRate, in
 
         // Send end control packet
         pckt = write_control(CONTROL_FIELD_PACKET_END, filename, fileSize);
+        max = sizeof(pckt.data);
+        size = 1 + max * 3;
         a = 1;
-        cnt = 0;
-        for(unsigned i = 0; i <= fileSize; i++){
+        for(unsigned i = 0; i < max; i++){
             if(a == 1){
                 a = 0;
                 data[i] = pckt.controlField;
                 i++;
             }
-            data[i++] = pckt.tlv->T;
-            data[i++] = pckt.tlv->L;
-            data[i++] = pckt.tlv->V;
-            cnt += i;
+            data[i++] = pckt.T;
+            data[i++] = pckt.L;
+            data[i++] = pckt.V;
         }
-        llwrite(data, cnt);
+        llwrite(data, size);
 
         printf("All bytes were written\n");
 
